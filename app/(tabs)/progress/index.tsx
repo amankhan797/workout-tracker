@@ -1,14 +1,17 @@
 import { View, ScrollView, StyleSheet, RefreshControl } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import ProgressGraph from "./screens/progress";
-import PersonalRecord from "./screens/personalRecord";
+import ProgressGraph from "../progress/screens/progress";
+import PersonalRecord from "../progress/screens/personalRecord";
 import { useState, useCallback, useRef } from "react";
-import MuscleStats from "./screens/muscleStats";
+import MuscleStats from "../progress/screens/muscleStats";
+import { useTheme } from "@/app/context/ThemeContext";
+ 
 
 const ProgressScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const progressGraphRef = useRef<{ fetchChartData: () => Promise<void> }>();
   const personalRecordRef = useRef<{ fetchData: () => Promise<void> }>();
+  const { themeColor } = useTheme();
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -33,7 +36,7 @@ const ProgressScreen = () => {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={["#ffffff"]}
+            colors={[themeColor]}
             tintColor="#ffffff"
             progressBackgroundColor="rgb(38, 38, 38)"
           />

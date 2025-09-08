@@ -7,19 +7,25 @@ import {
   TouchableOpacity, 
   RefreshControl,
   SafeAreaView,
-  ActivityIndicator,
   Alert
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import { getAllWorkoutLogs, deleteWorkoutLog } from '../../firebase';
 import { ToastAndroid } from 'react-native';
+import { useTheme } from '../context/ThemeContext';
+import {WaveIndicator } from 'react-native-indicators';
 
 interface Exercise {
   exercise_name: string;
-  reps: number;
-  weight: string;
+  sets?: {
+    set_number: number;
+    reps: number;
+    weight: string;
+  }[];
+  reps?: number;
+  weight?: string;
+  notes?: string;
 }
 
 interface WorkoutLog {
@@ -47,6 +53,7 @@ const HistoryScreen = () => {
   const [isSearching, setIsSearching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const { themeColor } = useTheme();
 
   const groupWorkoutsByDate = (logs: WorkoutLog[]) => {
     const grouped = logs.reduce((acc: { [key: string]: GroupedWorkout }, log) => {
@@ -116,10 +123,8 @@ const HistoryScreen = () => {
               const dateWorkout = groupedLogs.find(log => log.date === date);
               const groupIds = dateWorkout?.groups[muscleGroup]?.ids || [];
               
-              // Delete all workouts for this muscle group
               await Promise.all(groupIds.map(id => deleteWorkoutLog(id)));
               
-              // Update state
               const updatedLogs = workoutLogs.filter(log => !groupIds.includes(log.id));
               setWorkoutLogs(updatedLogs);
               const updatedGrouped = groupWorkoutsByDate(updatedLogs);
@@ -162,25 +167,39 @@ const HistoryScreen = () => {
     setIsSearching(false);
   };
 
-  const renderExerciseItem = ({ item }: { item: Exercise }) => (
-    <View style={styles.exerciseItem}>
-      <Text style={styles.exerciseName}>{item.exercise_name}</Text>
-      <View style={styles.statsRow}>
-        <Text style={styles.statsText}>{item.reps} reps</Text>
-        <Text style={styles.statsDivider}>•</Text>
-        <Text style={styles.statsText}>{item.weight} Kg</Text>
+  const renderExerciseItem = ({ item }: { item: Exercise }) => {
+    let totalReps: number;
+    let totalWeight: number;
+    let setCount: number;
+
+    if (item.sets && Array.isArray(item.sets)) {
+      totalReps = item.sets.reduce((sum, set) => sum + (set.reps || 0), 0);
+      totalWeight = item.sets.reduce((sum, set) => 
+        sum + (parseFloat(set.weight) || 0), 0);
+      setCount = item.sets.length;
+    } else {
+      totalReps = item.reps || 0;
+      totalWeight = parseFloat(item.weight || "0") || 0;
+      setCount = 1;
+    }
+
+    return (
+      <View style={styles.exerciseItem}>
+        <Text style={styles.exerciseName}>{item.exercise_name}</Text>
+        <View style={styles.statsRow}>
+          <Text style={styles.statsText}>{totalReps} total reps</Text>
+          <Text style={styles.statsDivider}>•</Text>
+          <Text style={styles.statsText}>{totalWeight} total Kg</Text>
+          <Text style={styles.statsDivider}>•</Text>
+          <Text style={styles.statsText}>{setCount} set{setCount !== 1 ? 's' : ''}</Text>
+        </View>
+        <Text style={styles.statsText}>{item.notes}</Text>
       </View>
-    </View>
-  );
+    );
+  };
 
   const renderMuscleGroupCard = (muscleGroup: string, exercises: Exercise[], date: string) => (
-    <LinearGradient
-      key={`${date}-${muscleGroup}`}
-      colors={['#2c3e50', '#3498db']}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.cardGradient}
-    >
+    <View key={`${date}-${muscleGroup}`} style={[styles.Historycard, { backgroundColor: themeColor + "40", padding: 8, borderColor: themeColor, marginVertical: 4 }]}>
       <View style={styles.cardHeader}>
         <View style={styles.muscleGroupBadge}>
           <Text style={styles.muscleGroupText}>{muscleGroup}</Text>
@@ -198,7 +217,7 @@ const HistoryScreen = () => {
         keyExtractor={(_, index) => index.toString()}
         scrollEnabled={false}
       />
-    </LinearGradient>
+      </View>
   );
 
   const renderDateGroup = ({ item }: { item: GroupedWorkout }) => (
@@ -213,7 +232,7 @@ const HistoryScreen = () => {
   if (isLoading) {
     return (
       <View style={styles.loaderContainer}>
-        <ActivityIndicator size="large" color="#3498db" />
+        <WaveIndicator color={themeColor} size={48} />
       </View>
     );
   }
@@ -223,7 +242,7 @@ const HistoryScreen = () => {
       <View style={styles.container}>
         <View style={styles.searchContainer}>
           <TouchableOpacity
-            style={styles.datePickerButton}
+            style={[styles.datePickerButton, { backgroundColor: themeColor + "20" }]}
             onPress={() => setShowDatePicker(true)}
           >
             <Ionicons name="calendar" size={20} color="#fff" />
@@ -257,7 +276,8 @@ const HistoryScreen = () => {
               refreshing={refreshing}
               onRefresh={onRefresh}
               tintColor="#fff"
-              colors={['#3498db']}
+              colors={[themeColor]}
+              progressBackgroundColor="rgb(38, 38, 38)"
             />
           }
           ListEmptyComponent={
@@ -268,13 +288,15 @@ const HistoryScreen = () => {
     </SafeAreaView>
   );
 };
-
 const styles = StyleSheet.create({
-  // ... keeping existing styles ...
   container: {
     flex: 1,
     backgroundColor: 'rgb(38, 38, 38)',
     padding: 16,
+  },
+  Historycard: {
+    borderWidth: 1,
+    borderRadius: 8,
   },
   dateGroup: {
     marginBottom: 20,
@@ -287,7 +309,6 @@ const styles = StyleSheet.create({
   datePickerButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#2c3e50',
     padding: 12,
     borderRadius: 8,
     flex: 1,
@@ -304,7 +325,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   cardGradient: {
-    borderRadius: 16,
+    borderRadius: 8,
     padding: 12,
     marginTop: 8,
   },
@@ -323,7 +344,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     paddingHorizontal: 12,
     paddingVertical: 4,
-    borderRadius: 12,
+    borderRadius: 8,
   },
   muscleGroupText: {
     color: '#fff',
@@ -360,7 +381,6 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: 'rgba(29, 29, 29, 1)',
-    paddingTop: 30,
   },
   deleteButton: {
     padding: 8,

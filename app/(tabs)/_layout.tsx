@@ -5,14 +5,16 @@ import { HapticTab } from "@/components/HapticTab";
 import { IconSymbol } from "@/components/ui/IconSymbol";
 import { useColorScheme } from "@/hooks/useColorScheme";
 import { MaterialIcons } from "@expo/vector-icons";
+import { useTheme } from "@/app/context/ThemeContext"; // Import useTheme
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  const { themeColor } = useTheme(); // Get the current theme color
 
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: "#3498db",
+        tabBarActiveTintColor: themeColor, // Use the theme color instead of hardcoded "#3498db"
         headerShown: false,
         tabBarButton: HapticTab,
         tabBarBackground: () => (
@@ -37,7 +39,7 @@ export default function TabLayout() {
       }}
     >
       <Tabs.Screen
-        name="index"
+        name="home"
         options={{
           title: "Home",
           tabBarIcon: ({ color }) => (
@@ -73,11 +75,11 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="GeminiChat"
+        name="SettingsScreen"
         options={{
-          title: "Gemini",
+          title: "Settings",
           tabBarIcon: ({ color }) => (
-            <MaterialIcons name="smart-toy" size={28} color={color} />
+            <MaterialIcons name="settings" size={28} color={color} />
           ),
         }}
       />

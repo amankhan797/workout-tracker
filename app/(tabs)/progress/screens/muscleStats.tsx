@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Dimensions, ActivityIndicator, ToastAndroid, Pl
 import { LineChart } from 'react-native-chart-kit';
 import { Picker } from '@react-native-picker/picker';
 import { getMuscleGroups, getExercises, getAllWorkoutLogs } from '../../../../firebase.js';
+import { useTheme } from '../../../context/ThemeContext'; // Import useTheme
 
 interface MuscleGroup {
   id: string;
@@ -21,8 +22,11 @@ interface WorkoutLog {
   muscle_group: string;
   exercises: Array<{
     exercise_name: string;
-    weight: string | number;
-    reps: number;
+    sets: Array<{
+      set_number: number;
+      reps: number;
+      weight: string;
+    }>;
   }>;
 }
 
@@ -37,6 +41,7 @@ interface ChartData {
 }
 
 const MuscleStats: React.FC = () => {
+  const { themeColor } = useTheme(); // Get the theme color
   const [muscleGroups, setMuscleGroups] = useState<MuscleGroup[]>([]);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [selectedMuscle, setSelectedMuscle] = useState<string>('');
@@ -44,24 +49,25 @@ const MuscleStats: React.FC = () => {
   const [chartData, setChartData] = useState<ChartData | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [workoutLogs, setWorkoutLogs] = useState<WorkoutLog[]>([]);
 
   const pickerStyles = Platform.select({
     android: {
-      color: "#fff",
-      backgroundColor: "rgb(38, 38, 38)",
-      dropdownIconColor: "#fff",
+      color: '#fff',
+      backgroundColor: 'rgb(38, 38, 38)',
+      dropdownIconColor: '#fff',
     },
     ios: {
-      color: "#fff",
+      color: '#fff',
     },
   });
 
   const emptyChartData: ChartData = {
-    labels: ['Start'],
+    labels: ['No Data'],
     datasets: [
       {
         data: [0],
-        color: (opacity = 1) => `rgba(134, 65, 244, ${opacity})`,
+        color: (opacity = 1) => `${themeColor}${Math.floor(opacity * 255).toString(16).padStart(2, '0')}`,
         strokeWidth: 2,
       },
       {
@@ -70,38 +76,48 @@ const MuscleStats: React.FC = () => {
         strokeWidth: 2,
       },
     ],
-    legend: ['Weight (kg)', 'Reps'],
+    legend: ['Avg Weight (kg)', 'Avg Reps'],
   };
 
   useEffect(() => {
     loadMuscleGroups();
+    loadAllWorkoutLogs();
   }, []);
 
   useEffect(() => {
     if (selectedMuscle) {
       loadExercises();
       setSelectedExercise('');
+      setChartData(emptyChartData);
     }
   }, [selectedMuscle]);
 
   useEffect(() => {
-    if (selectedExercise) {
-      loadWorkoutData();
-    } else {
+    if (selectedExercise && workoutLogs.length > 0) {
+      processChartData();
+    } else if (!selectedExercise) {
       setChartData(emptyChartData);
     }
-  }, [selectedExercise]);
+  }, [selectedExercise, workoutLogs]);
+
+  const loadAllWorkoutLogs = async () => {
+    try {
+      const logs = await getAllWorkoutLogs();
+      setWorkoutLogs(logs);
+    } catch (error) {
+      console.error('Error loading workout logs:', error);
+      setError('Failed to load workout history');
+    }
+  };
 
   const loadMuscleGroups = async () => {
     setLoading(true);
     try {
       const groups = await getMuscleGroups();
-      
       if (!groups || groups.length === 0) {
         setError('No muscle groups available');
         return;
       }
-
       setMuscleGroups(groups);
       setError(null);
     } catch (error) {
@@ -115,7 +131,6 @@ const MuscleStats: React.FC = () => {
     setLoading(true);
     try {
       const selectedGroup = muscleGroups.find(group => group.id === selectedMuscle);
-      
       if (!selectedGroup) {
         setError('Selected muscle group not found');
         return;
@@ -140,57 +155,77 @@ const MuscleStats: React.FC = () => {
     }
   };
 
-  const loadWorkoutData = async () => {
+  const processChartData = () => {
     setLoading(true);
     setError(null);
-    
+
     try {
       const selectedExerciseData = exercises.find(ex => ex.id === selectedExercise);
       if (!selectedExerciseData) {
         throw new Error('Selected exercise not found');
       }
-
-      const logs: WorkoutLog[] = await getAllWorkoutLogs();
+      const exerciseLogs = [];
       
-      const exerciseLogs = logs
-        .reduce((acc: Array<{date: string; weight: number; reps: number}>, log) => {
-          const matchingExercise = log.exercises.find(
-            ex => ex.exercise_name.toLowerCase() === selectedExerciseData.name.toLowerCase()
-          );
-          
-          if (matchingExercise) {
-            acc.push({
+      // Process each workout log
+      for (const log of workoutLogs) {
+        // Find matching exercise by name (case insensitive)
+        const matchingExercise = log.exercises.find(
+          ex => ex.exercise_name && ex.exercise_name.toLowerCase() === selectedExerciseData.name.toLowerCase()
+        );
+
+        if (matchingExercise) {
+          // Handle both array of sets and direct weight/reps properties
+          if (Array.isArray(matchingExercise.sets) && matchingExercise.sets.length > 0) {
+            // Handle sets array format
+            const totalWeight = matchingExercise.sets.reduce((sum, set) => {
+              const weightNum = parseFloat(set.weight);
+              return isNaN(weightNum) ? sum : sum + weightNum;
+            }, 0);
+
+            const totalReps = matchingExercise.sets.reduce((sum, set) => sum + set.reps, 0);
+            const setCount = matchingExercise.sets.length;
+
+            exerciseLogs.push({
               date: log.date,
-              weight: Number(matchingExercise.weight),
-              reps: matchingExercise.reps
+              avgWeight: parseFloat((totalWeight / setCount).toFixed(1)),
+              avgReps: parseFloat((totalReps / setCount).toFixed(1)),
+            });
+          } else if (matchingExercise.weight && matchingExercise.reps) {
+            // Handle direct weight/reps properties (as in personalRecord.tsx)
+            const weight = parseFloat(matchingExercise.weight);
+            exerciseLogs.push({
+              date: log.date,
+              avgWeight: isNaN(weight) ? 0 : weight,
+              avgReps: matchingExercise.reps || 0,
             });
           }
-          return acc;
-        }, [])
-        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
+        }
+      }
+      
+      // Sort logs by date
+      exerciseLogs.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      
       if (exerciseLogs.length === 0) {
+        setError(`No workout data found for ${selectedExerciseData.name}`);
         setChartData(emptyChartData);
         return;
       }
 
-      const startDate = new Date(exerciseLogs[0].date);
-      startDate.setDate(startDate.getDate() - 1);
-      
-      const labels = ['Start', ...exerciseLogs.map(log => {
+      // Format dates for display
+      const labels = exerciseLogs.map(log => {
         const date = new Date(log.date);
         return `${date.getDate()}/${date.getMonth() + 1}`;
-      })];
+      });
 
-      const weights = [0, ...exerciseLogs.map(log => log.weight)];
-      const reps = [0, ...exerciseLogs.map(log => log.reps)];
+      const weights = exerciseLogs.map(log => log.avgWeight);
+      const reps = exerciseLogs.map(log => log.avgReps);
 
-      setChartData({
+      const newChartData = {
         labels,
         datasets: [
           {
             data: weights,
-            color: (opacity = 1) => `rgba(134, 65, 244, ${opacity})`,
+            color: (opacity = 1) => `${themeColor}${Math.floor(opacity * 255).toString(16).padStart(2, '0')}`,
             strokeWidth: 2,
           },
           {
@@ -199,11 +234,18 @@ const MuscleStats: React.FC = () => {
             strokeWidth: 2,
           },
         ],
-        legend: ['Weight (kg)', 'Reps'],
-      });
+        legend: ['Avg Weight (kg)', 'Avg Reps'],
+      };
+
+      setChartData(newChartData);
       
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(`Showing data for ${selectedExerciseData.name}`, ToastAndroid.SHORT);
+      }
+
     } catch (error) {
-      setError('Failed to load workout data');
+      console.error('Error processing chart data:', error);
+      setError('Failed to process workout data');
       setChartData(emptyChartData);
     } finally {
       setLoading(false);
@@ -213,48 +255,53 @@ const MuscleStats: React.FC = () => {
   return (
     <View style={styles.container}>
       {error && <Text style={styles.errorText}>{error}</Text>}
-      
-      <LineChart
-        data={chartData || emptyChartData}
-        width={Dimensions.get('window').width - 20}
-        height={220}
-        chartConfig={{
-          backgroundColor: '#333',
-          backgroundGradientFrom: '#333',
-          backgroundGradientTo: '#333',
-          decimalPlaces: 1,
-          color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
-          style: {
-            borderRadius: 16,
-          },
-          propsForDots: {
-            r: "4",
-            strokeWidth: "2",
-            stroke: "#ffa726"
-          }
-        }}
-        bezier
-        style={styles.chart}
-        fromZero={true}
-        yAxisInterval={5}
-      />
+
+      <View style={styles.chartContainer}>
+        {chartData && (
+          <LineChart
+            data={chartData}
+            width={Dimensions.get('window').width - 20}
+            height={220}
+            chartConfig={{
+              backgroundColor: '#333',
+              backgroundGradientFrom: '#333',
+              backgroundGradientTo: '#333',
+              decimalPlaces: 1,
+              color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
+              labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
+              style: {
+                borderRadius: 8,
+              },
+              propsForDots: {
+                r: '4',
+                strokeWidth: '2',
+                stroke: themeColor,
+              },
+            }}
+            bezier
+            style={styles.chart}
+            fromZero={true}
+            yAxisInterval={1}
+          />
+        )}
+      </View>
 
       {loading && (
-        <ActivityIndicator size="large" color="#3498db" style={styles.loader} />
+        <ActivityIndicator size="large" color={themeColor} style={styles.loader} />
       )}
 
-      <View style={styles.pickerContainer}>
+      <View style={[styles.pickerContainer, { borderColor: `${themeColor}3a` }]}>
         <Picker
           selectedValue={selectedMuscle}
           onValueChange={(itemValue: string) => setSelectedMuscle(itemValue)}
           style={[styles.picker, pickerStyles]}
           dropdownIconColor="#fff"
-          mode={Platform.OS === "android" ? "dropdown" : "dialog"}
+          mode={Platform.OS === 'android' ? 'dropdown' : 'dialog'}
         >
           <Picker.Item
             label="Select Muscle Group"
             value=""
-            color={Platform.OS === "android" ? "#fff" : "rgba(255, 255, 255, 0.5)"}
+            color={Platform.OS === 'android' ? '#fff' : 'rgba(255, 255, 255, 0.5)'}
             style={styles.pickerItem}
           />
           {muscleGroups.map((group) => (
@@ -269,31 +316,31 @@ const MuscleStats: React.FC = () => {
         </Picker>
       </View>
 
-      <View style={styles.pickerContainer}>
-          <Picker
-            selectedValue={selectedExercise}
-            onValueChange={(itemValue: string) => setSelectedExercise(itemValue)}
-            style={[styles.picker, pickerStyles]}
-            enabled={!!selectedMuscle}
-            dropdownIconColor="#fff"
-            mode={Platform.OS === "android" ? "dropdown" : "dialog"}
-          >
+      <View style={[styles.pickerContainer, { borderColor: `${themeColor}3a` }]}>
+        <Picker
+          selectedValue={selectedExercise}
+          onValueChange={(itemValue: string) => setSelectedExercise(itemValue)}
+          style={[styles.picker, pickerStyles]}
+          enabled={!!selectedMuscle}
+          dropdownIconColor="#fff"
+          mode={Platform.OS === 'android' ? 'dropdown' : 'dialog'}
+        >
+          <Picker.Item
+            label="Select Exercise"
+            value=""
+            color={Platform.OS === 'android' ? '#fff' : 'rgba(255, 255, 255, 0.5)'}
+            style={styles.pickerItem}
+          />
+          {exercises.map((exercise) => (
             <Picker.Item
-              label="Select Exercise"
-              value=""
-              color={Platform.OS === "android" ? "#fff" : "rgba(255, 255, 255, 0.5)"}
+              key={exercise.id}
+              label={exercise.name}
+              value={exercise.id}
+              color="#fff"
               style={styles.pickerItem}
             />
-            {exercises.map((exercise) => (
-              <Picker.Item
-                key={exercise.id}
-                label={exercise.name}
-                value={exercise.id}
-                color="#fff"
-                style={styles.pickerItem}
-              />
-            ))}
-          </Picker>
+          ))}
+        </Picker>
       </View>
     </View>
   );
@@ -308,25 +355,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     borderRadius: 8,
   },
+  chartContainer: {
+    width: '100%',
+    alignItems: 'center',
+    marginVertical: 8,
+  },
   chart: {
     marginVertical: 8,
-    borderRadius: 16,
+    borderRadius: 8,
   },
   pickerContainer: {
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.2)",
+    borderColor: 'rgba(255, 255, 255, 0.2)',
     borderRadius: 8,
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    overflow: "hidden",
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    overflow: 'hidden',
     width: '100%',
   },
   picker: {
-    color: "#fff",
+    color: '#fff',
   },
   pickerItem: {
-    backgroundColor: "rgb(38, 38, 38)",
-    color: "#fff",
+    backgroundColor: 'rgb(38, 38, 38)',
+    color: '#fff',
     fontSize: 14,
   },
   errorText: {
@@ -339,7 +391,7 @@ const styles = StyleSheet.create({
     top: '50%',
     left: '50%',
     transform: [{ translateX: -25 }, { translateY: -25 }],
-  }
+  },
 });
 
 export default MuscleStats;

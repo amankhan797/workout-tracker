@@ -10,7 +10,7 @@ export default function ProgressLayout() {
       <Stack.Screen 
         name="index"
         options={{
-          title: 'Progress',
+          title: 'progress',
         }}
       />
     </Stack>

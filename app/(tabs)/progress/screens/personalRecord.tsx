@@ -11,6 +11,8 @@ import {
   getExercises,
   getAllWorkoutLogs,
 } from "../../../../firebase";
+// Add this import
+import { useTheme } from "../../../context/ThemeContext";
 
 interface MuscleGroup {
   id: string;
@@ -39,7 +41,8 @@ interface WorkoutLog {
 const PersonalRecord = forwardRef((props, ref) => {
   const [muscleGroups, setMuscleGroups] = useState<MuscleGroup[]>([]);
   const [exercises, setExercises] = useState<Exercise[]>([]);
-  const [personalRecords, setPersonalRecords] = useState<{ [key: string]: number }>({});
+  // Store both weight and reps for each exercise
+  const [personalRecords, setPersonalRecords] = useState<{ [key: string]: { weight?: number, reps?: number } }>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   useImperativeHandle(ref, () => ({
@@ -94,15 +97,25 @@ const PersonalRecord = forwardRef((props, ref) => {
       setMuscleGroups(sortedMuscleGroups);
       setExercises(updatedExercises);
 
-      const records: { [key: string]: number } = {};
+      // Track both max weight and max reps for each exercise
+      const records: { [key: string]: { weight?: number, reps?: number } } = {};
       workoutLogs.forEach((log: WorkoutLog) => {
         if (Array.isArray(log.exercises)) {
           log.exercises.forEach((exercise: WorkoutExercise) => {
-            const weight = parseFloat(exercise.weight) || 0;
+            const weight = parseFloat(exercise.weight);
+            const reps = exercise.reps;
             const exerciseName = exercise.exercise_name;
 
-            if (!records[exerciseName] || weight > records[exerciseName]) {
-              records[exerciseName] = weight;
+            // If weight is a valid number and > 0, prioritize weight
+            if (!isNaN(weight) && weight > 0) {
+              if (!records[exerciseName] || (records[exerciseName].weight ?? 0) < weight) {
+                records[exerciseName] = { weight, reps };
+              }
+            } else {
+              // If no weight, track max reps
+              if (!records[exerciseName] || ((records[exerciseName].weight ?? 0) === 0 && (records[exerciseName].reps ?? 0) < reps)) {
+                records[exerciseName] = { reps };
+              }
             }
           });
         }
@@ -120,28 +133,104 @@ const PersonalRecord = forwardRef((props, ref) => {
     fetchData();
   }, []);
 
+  // Get theme color from context
+  const { themeColor } = useTheme();
+
   const screenWidth = Dimensions.get("window").width;
   const cardWidth = (screenWidth - 48 - 4) / 3;
 
+  // Dynamic styles using themeColor
+  const dynamicStyles = StyleSheet.create({
+    container: {
+      flex: 1,
+      marginTop: 8,
+      borderRadius: 8,
+      padding: 4,
+      borderWidth: 1,
+      borderColor: "#666",
+      backgroundColor: "#333",
+    },
+    title: {
+      textAlign: "center",
+      color: "#fff",
+      fontSize: 18,
+      fontWeight: "bold",
+      marginBottom: 8,
+    },
+    messageContainer: {
+      backgroundColor: "#333",
+      borderRadius: 8,
+      padding: 0,
+      alignItems: "center",
+      width: "100%",
+      marginVertical: 20,
+    },
+    messageText: {
+      color: "#fff",
+      fontSize: 16,
+    },
+    errorText: {
+      color: "red",
+      textAlign: "center",
+      fontSize: 16,
+    },
+    muscleGroupContainer: {
+      marginBottom: 16
+    },
+    muscleGroupTitle: {
+      fontSize: 16,
+      fontWeight: "bold",
+      color: "#fff",
+      marginBottom: 8,
+    },
+    cardsContainer: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 2,
+      justifyContent: "center",
+    },
+    card: {
+      borderColor: themeColor,
+      borderWidth: 1,
+      backgroundColor: themeColor + '60',
+      borderRadius: 8,
+      padding: 8,
+      minHeight: 70,
+      justifyContent: "space-between",
+    },
+    exerciseName: {
+      textAlign: "center",
+      fontSize: 12,
+      fontWeight: "600",
+      color: "#fff",
+    },
+    recordText: {
+      textAlign: "center",
+      fontSize: 16,
+      color: "#fff",
+      fontWeight: "800",
+    },
+  });
+
   if (loading) {
     return (
-      <View style={styles.messageContainer}>
-        <Text style={styles.messageText}>Loading Personal Records...</Text>
+      <View style={dynamicStyles.messageContainer}>
+        <Text style={dynamicStyles.messageText}>Loading Personal Records...</Text>
       </View>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.messageContainer}>
-        <Text style={styles.errorText}>{error}</Text>
+      <View style={dynamicStyles.messageContainer}>
+        <Text style={dynamicStyles.errorText}>{error}</Text>
       </View>
     );
   }
 
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.title}>Personal Records</Text>
+    <ScrollView style={dynamicStyles.container}>
+      <Text style={dynamicStyles.title}>Personal Records</Text>
       {muscleGroups.map((group: MuscleGroup) => {
         const groupExercises = exercises.filter(
           (exercise: Exercise) => exercise.muscleGroup === group.id
@@ -152,22 +241,34 @@ const PersonalRecord = forwardRef((props, ref) => {
         }
 
         return (
-          <View key={group.id} style={styles.muscleGroupContainer}>
-            <Text style={styles.muscleGroupTitle}>{group.name}</Text>
-            <View style={styles.cardsContainer}>
-              {groupExercises.map((exercise: Exercise) => (
-                <View
-                  key={exercise.id}
-                  style={[styles.card, { width: cardWidth }]}
-                >
-                  <Text style={styles.recordText}>
-                    {personalRecords[exercise.name] || 0} kg
-                  </Text>
-                  <Text style={styles.exerciseName} numberOfLines={2}>
-                    {exercise.name}
-                  </Text>
-                </View>
-              ))}
+          <View key={group.id} style={dynamicStyles.muscleGroupContainer}>
+            <Text style={dynamicStyles.muscleGroupTitle}>{group.name}</Text>
+            <View style={dynamicStyles.cardsContainer}>
+              {groupExercises.map((exercise: Exercise) => {
+                const record = personalRecords[exercise.name];
+                let displayValue = "0";
+                let unit = "";
+                if (record?.weight && record.weight > 0) {
+                  displayValue = `${record.weight} kg`;
+                  unit = "kg";
+                } else if (record?.reps && record.reps > 0) {
+                  displayValue = `${record.reps} reps`;
+                  unit = "reps";
+                }
+                return (
+                  <View
+                    key={exercise.id}
+                    style={[dynamicStyles.card, { width: cardWidth }]}
+                  >
+                    <Text style={dynamicStyles.recordText}>
+                      {displayValue}
+                    </Text>
+                    <Text style={dynamicStyles.exerciseName} numberOfLines={2}>
+                      {exercise.name}
+                    </Text>
+                  </View>
+                );
+              })}
             </View>
           </View>
         );
@@ -176,71 +277,3 @@ const PersonalRecord = forwardRef((props, ref) => {
   );
 });
 export default PersonalRecord;
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    marginTop: 8,
-    borderRadius: 8,
-    padding: 8,
-    backgroundColor: "#333",
-  },
-  title: {
-    textAlign: "center",
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-    marginBottom: 8,
-  },
-  messageContainer: {
-    backgroundColor: "#333",
-    borderRadius: 8,
-    padding: 20,
-    alignItems: "center",
-    width: "100%",
-    marginVertical: 20,
-  },
-  messageText: {
-    color: "#fff",
-    fontSize: 16,
-  },
-  errorText: {
-    color: "red",
-    textAlign: "center",
-    fontSize: 16,
-  },
-  muscleGroupContainer: {
-    marginBottom: 16,
-  },
-  muscleGroupTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#fff",
-    marginBottom: 8,
-  },
-  cardsContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "flex-start",
-    gap: 2,
-  },
-  card: {
-    backgroundColor: "#3498db",
-    borderRadius: 8,
-    padding: 8,
-    minHeight: 70,
-    justifyContent: "space-between",
-  },
-  exerciseName: {
-    textAlign: "center",
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#fff",
-  },
-  recordText: {
-    textAlign: "center",
-    fontSize: 16,
-    color: "#fff",
-    fontWeight: "800",
-  },
-});
